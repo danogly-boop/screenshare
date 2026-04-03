@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>ScreenShare</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0e1117; --surface: #161b27; --border: #242938;
+    --text: #e2e8f0; --muted: #5a6282; --accent: #6366f1;
+    --green: #22c55e; --red: #ef4444; --amber: #f59e0b;
+  }
+  body {
+    width: 320px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, sans-serif;
+    font-size: 13px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .header {
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 700; font-size: 15px;
+  }
+  .logo {
+    width: 24px; height: 24px; background: var(--accent);
+    border-radius: 6px; display: flex; align-items: center;
+    justify-content: center; font-size: 12px;
+  }
+  .status-row {
+    display: flex; align-items: center; gap: 7px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 12px;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); flex-shrink: 0; }
+  .dot.ok { background: var(--green); box-shadow: 0 0 5px var(--green); }
+  .dot.warn { background: var(--amber); }
+  .dot.pulse { animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .status-text { flex: 1; color: var(--muted); }
+  label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; display: block; margin-bottom: 4px; }
+  input {
+    width: 100%; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); padding: 8px 10px; font-size: 13px;
+    outline: none; transition: border-color .15s; font-family: inherit;
+  }
+  input:focus { border-color: var(--accent); }
+  input::placeholder { color: var(--muted); }
+  .btn {
+    width: 100%; padding: 9px; border-radius: 7px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); font-size: 13px; font-weight: 500;
+    cursor: pointer; transition: all .15s; font-family: inherit;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: #4f46e5; }
+  .btn.danger { border-color: var(--red); color: var(--red); }
+  .divider { height: 1px; background: var(--border); }
+  .section { display: flex; flex-direction: column; gap: 8px; }
+  .tabs-list {
+    max-height: 160px; overflow-y: auto;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; display: flex; flex-direction: column;
+  }
+  .tab-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; cursor: pointer; transition: background .1s;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab-item:last-child { border-bottom: none; }
+  .tab-item:hover { background: rgba(99,102,241,.08); }
+  .tab-item.active-target { background: rgba(99,102,241,.15); }
+  .tab-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+  .tab-check { color: var(--accent); font-size: 14px; flex-shrink: 0; }
+  .hint { color: var(--muted); font-size: 11px; line-height: 1.5; }
+  #section-tabs { display: none; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">⟳</div>
+  ScreenShare Remote
+</div>
+
+<div class="status-row">
+  <span class="dot" id="dot"></span>
+  <span class="status-text" id="status-text">Загрузка...</span>
+</div>
+
+<div class="section">
+  <div>
+    <label>URL сервера</label>
+    <input type="text" id="relay-url" placeholder="https://screenshare-xxx.onrender.com">
+  </div>
+  <div>
+    <label>Код комнаты</label>
+    <input type="text" id="room-id" placeholder="A1B2C3D4" maxlength="8"
+      oninput="this.value=this.value.toUpperCase()">
+  </div>
+  <button class="btn primary" id="btn-connect" onclick="doConnect()">Подключиться</button>
+  <button class="btn danger" id="btn-disconnect" onclick="doDisconnect()" style="display:none">Отключиться</button>
+</div>
+
+<div class="divider"></div>
+
+<div class="section" id="section-tabs">
+  <label>Целевая вкладка</label>
+  <div class="tabs-list" id="tabs-list"></div>
+  <p class="hint">Выбери вкладку которой будет управлять гость.<br>Если не выбрать — управляется активная вкладка.</p>
+</div>
+
+<div class="divider"></div>
+<p class="hint">
+  1. Введи URL сервера и код комнаты<br>
+  2. Нажми «Подключиться»<br>
+  3. Гость увидит зелёный статус на сайте
+</p>
+
+<script>
+let currentTabId = null;
+
+async function loadStatus() {
+  chrome.runtime.sendMessage({ type: 'get-status' }, (res) => {
+    if (!res) return;
+    setStatus(res.connected ? 'connected' : 'disconnected');
+    if (res.relayUrl) document.getElementById('relay-url').value = res.relayUrl;
+    if (res.roomId) document.getElementById('room-id').value = res.roomId;
+  });
+}
+
+async function loadTabs() {
+  chrome.runtime.sendMessage({ type: 'get-tabs' }, (res) => {
+    if (!res || !res.tabs) return;
+    chrome.storage.local.get(['targetTabId'], (s) => {
+      currentTabId = s.targetTabId || null;
+      const list = document.getElementById('tabs-list');
+      list.innerHTML = '';
+      res.tabs.forEach(tab => {
+        const el = document.createElement('div');
+        el.className = 'tab-item' + (tab.id === currentTabId ? ' active-target' : '');
+        el.innerHTML = `
+          <span class="tab-title" title="${tab.url}">${tab.title || tab.url}</span>
+          ${tab.id === currentTabId ? '<span class="tab-check">✓</span>' : ''}
+        `;
+        el.onclick = () => {
+          chrome.runtime.sendMessage({ type: 'set-target-tab', tabId: tab.id });
+          currentTabId = tab.id;
+          loadTabs();
+        };
+        list.appendChild(el);
+      });
+    });
+  });
+}
+
+function setStatus(s) {
+  const dot = document.getElementById('dot');
+  const text = document.getElementById('status-text');
+  const btnC = document.getElementById('btn-connect');
+  const btnD = document.getElementById('btn-disconnect');
+  const tabsSec = document.getElementById('section-tabs');
+
+  if (s === 'connected') {
+    dot.className = 'dot ok';
+    text.textContent = 'Подключено — управление активно';
+    btnC.style.display = 'none';
+    btnD.style.display = 'block';
+    tabsSec.style.display = 'flex';
+    loadTabs();
+  } else if (s === 'connecting') {
+    dot.className = 'dot warn pulse';
+    text.textContent = 'Подключение...';
+    btnC.disabled = true;
+  } else {
+    dot.className = 'dot';
+    text.textContent = 'Не подключено';
+    btnC.style.display = 'block';
+    btnC.disabled = false;
+    btnD.style.display = 'none';
+    tabsSec.style.display = 'none';
+  }
+}
+
+function doConnect() {
+  const relayUrl = document.getElementById('relay-url').value.trim().replace(/\/$/, '');
+  const roomId = document.getElementById('room-id').value.trim().toUpperCase();
+  if (!relayUrl || !roomId) { alert('Заполни оба поля'); return; }
+  setStatus('connecting');
+  chrome.runtime.sendMessage({ type: 'connect', relayUrl, roomId }, () => {
+    setTimeout(loadStatus, 1500);
+  });
+}
+
+function doDisconnect() {
+  chrome.runtime.sendMessage({ type: 'disconnect' }, () => setStatus('disconnected'));
+}
+
+// Слушать обновления статуса от background
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'status') setStatus(msg.status === 'connected' ? 'connected' : 'disconnected');
+});
+
+loadStatus();
+</script>
+</body>
+</html>
